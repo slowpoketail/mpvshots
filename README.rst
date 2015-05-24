@@ -28,7 +28,7 @@ fact replace mpv's screenshot command by a call to mpvshots, which makes the
 entire process transparent, you just keep taking screenshots as usual.
 
 To work, *mpvshotsd* obviously needs to be able to access your Twitter account.
-To do this, *mpvshots* does OAUTH and save the credentials for the daemon to
+To do this, *mpvshots* does OAUTH and saves the credentials for the daemon to
 access. It will save them in *~/.mpvshots/*. This is also where mpvshots'
 configuration file will eventually be found.
 
