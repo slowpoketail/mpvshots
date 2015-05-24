@@ -1,0 +1,5 @@
+*.jpeg
+*.png
+*.py[oc]
+__pycache__
+.ropeproject
