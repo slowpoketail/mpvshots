@@ -8,9 +8,11 @@
 # of the Anti-License. Do whatever the fuck you want.
 
 from .twitter import TwitterBackend
+from .null    import NullBackend
 
 _map = {
     "twitter": TwitterBackend,
+    "null":    NullBackend,
 }
 
 # already initialized backend objects
