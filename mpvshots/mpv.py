@@ -7,10 +7,11 @@
 # This program is Free Software under the non-terms
 # of the Anti-License. Do whatever the fuck you want.
 
-from threading import Thread
-from queue import Queue, Empty
+import pykka
+import asynchat, asyncore
 
-from . import promise
+from concurrent.futures import Future
+from queue import Queue, Empty
 
 import socket
 import json
@@ -20,28 +21,21 @@ from slowtils import trace
 # TODO: get this from a config file
 MPV_SOCKET_PATH = "/tmp/mpv.sock"
 
-class Mpv(Thread):
+class MpvClient(asynchat.async_chat):
 
-    """ An interface to mpv's JSON IPC.
+    """ An asynchronous interface to mpv's JSON IPC.
 
     """
 
+    def __init__(self, mpv_sock_path):
+        asynchat.async_chat.__init__(self)
+        self.create_socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.connect(mpv_sock_path)
+        self.set_terminator(b"\n")
 
-    def __init__(self):
-        super().__init__()
         self._events = Queue()
         self._awaiting_reply = Queue()
-        self._mpvsock = self._make_socket()
-        self._keep_going = True
-
-    @staticmethod
-    def _make_socket():
-        return socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-
-    @staticmethod
-    def _connect_socket(sock):
-
-        sock.connect(MPV_SOCKET_PATH)
+        self._ibuffer = []
 
     @staticmethod
     def _make_json_command(cmd_name, *params):
@@ -54,8 +48,8 @@ class Mpv(Thread):
         what = json.loads(jstring)
         if "error" in what.keys():
             try:
-                fulfill = self._awaiting_reply.get_nowait()
-                fulfill(what)
+                future = self._awaiting_reply.get_nowait()
+                future.set_result(what)
             except Empty:
                 pass
         elif "event" in what.keys():
@@ -66,41 +60,25 @@ class Mpv(Thread):
     def send_command(self, cmd_name, *params):
         """Send a command to mpv.
 
-        This method will return a promise as a reply, which can be ask()'d for
-        its value. This will block until the reply arrives.
+        This method will return a future as a reply.
 
         """
-        if not self.is_alive():
-            raise Exception("Listening process is no longer alive.")
         cmd = self._make_json_command(cmd_name, *params)
-        reply_promise, fulfill = promise.new()
-        self._awaiting_reply.put(fulfill)
-        self._mpvsock.send(cmd)
-        return reply_promise
+        reply_future = Future()
+        self._awaiting_reply.put(reply_future)
+        self.send(cmd)
+        return reply_future
 
-    def run(self):
-        self._connect_socket(self._mpvsock)
-        # temporary storage for partial lines
-        partial_line = ""
-        while self._keep_going:
-            data = partial_line + self._mpvsock.recv(4096).decode()
-            if data == "":
-                break
-            lines = data.split("\n")
-            for line in lines[:-1]:
-                self._read_json(line)
+    def collect_incoming_data(self, data):
+        self._ibuffer.append(data)
 
-            partial_line = lines[-1]
-        self._mpvsock.close()
+    def found_terminator(self):
+        data = b"".join(self._ibuffer).decode()
+        self._ibuffer = []
+        self._read_json(data)
 
     def get_event(self, block=True, timeout=None):
         return self._events.get(block, timeout)
 
     def get_event_nowait(self):
         return self.get_event(block=False)
-
-    def stop(self):
-        """Stop the daemon."""
-        self._keep_going = False
-        # we send a command to get the loop to terminate
-        self.send_command("get_property", "pause")
